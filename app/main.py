@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from app.config import get_settings
 
 # 🗄 DATABASE
-from app.db import engine, Base
+from app.db import engine
 
 # 🔐 AUTH
 from app.auth.deps import get_current_user
@@ -32,16 +32,7 @@ settings = get_settings()
 # =========================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 🔵 STARTUP
-    Base.metadata.create_all(bind=engine)
-    print("🚀 API started")
-
     yield
-
-    # 🔴 SHUTDOWN
-    print("🛑 API shutdown")
-
-
 # =========================
 # APP INIT
 # =========================
@@ -90,9 +81,20 @@ async def root():
     }
 
 
+from sqlalchemy import text
+from app.db import engine
+
 @app.get("/health")
 async def health():
-    return {"status": "healthy"}
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return {"status": "healthy", "database": "ok"}
+    except Exception as e:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unhealthy", "database": str(e)},
+        )
 
 # =========================
 # FULL CHAIN (AUTH REQUIRED)
@@ -167,4 +169,7 @@ async def generate_prompt1_only(
         return result
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail="AI generation failed. Please try again.",
+        )
