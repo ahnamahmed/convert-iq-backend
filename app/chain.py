@@ -4,22 +4,11 @@ from app.cache import cache_prompt1_output, get_cached_prompt1_output
 from app.ai.gemini_client import call_gemini
 import re
 
-# =========================
-# Load settings
-# =========================
 settings = get_settings()
 
-# =========================
-# Safety check (Gemini)
-# =========================
 if not settings.gemini_api_key:
-    raise RuntimeError(
-        "GEMINI_API_KEY is missing. Make sure it exists in backend/.env"
-    )
+    raise RuntimeError("GEMINI_API_KEY is missing")
 
-# =========================
-# Result schema
-# =========================
 class PromptChainResult(TypedDict, total=False):
     title: str
     bullets: List[str]
@@ -28,9 +17,6 @@ class PromptChainResult(TypedDict, total=False):
     ad_hooks_and_test: str
 
 
-# =========================
-# Core chain runner
-# =========================
 async def runPromptChain(
     user_id: str,
     product_info: str,
@@ -39,16 +25,8 @@ async def runPromptChain(
     run_prompt3: bool = True,
     run_prompt4: bool = True,
 ) -> PromptChainResult:
-    """
-    Executes a chained AI pipeline.
-    Prompt 1 output is cached.
-    Prompts 2–4 depend on previous steps.
-    """
 
-    # -------------------------
-    # Shared AI caller (Gemini)
-    # DO NOT RENAME — no refactor
-    # -------------------------
+    # Gemini-safe wrapper (DO NOT rename)
     async def call_openai(
         messages: List[Dict[str, str]],
         temperature: float,
@@ -58,9 +36,6 @@ async def runPromptChain(
             temperature=temperature,
         )
 
-    # -------------------------
-    # PROMPT 1 — Product Understanding
-    # -------------------------
     async def prompt1(product_info: str) -> Dict[str, Any]:
         prompt = f"""
 Analyze the product information below and extract:
@@ -78,7 +53,6 @@ Product information:
 
 Return structured sections.
 """
-
         analysis = await call_openai(
             [
                 {"role": "system", "content": "You are an expert eCommerce product analyst."},
@@ -87,14 +61,8 @@ Return structured sections.
             temperature=0.6,
         )
 
-        return {
-            "raw_analysis": analysis,
-            "product_info": product_info,
-        }
+        return {"raw_analysis": analysis, "product_info": product_info}
 
-    # -------------------------
-    # PROMPT 2 — Conversion Description
-    # -------------------------
     async def prompt2(p1: Dict[str, Any]) -> Dict[str, Any]:
         prompt = f"""
 Using the product understanding below, write a HIGH-CONVERTING product description.
@@ -119,7 +87,6 @@ Product Understanding:
 Original Product Info:
 {product_info}
 """
-
         description = await call_openai(
             [
                 {"role": "system", "content": "You are a high-converting eCommerce copywriter."},
@@ -130,9 +97,6 @@ Original Product Info:
 
         return {"description": description}
 
-    # -------------------------
-    # PROMPT 3 — CRO Audit
-    # -------------------------
     async def prompt3(description: str) -> Dict[str, Any]:
         prompt = f"""
 Act as a CRO expert.
@@ -150,7 +114,6 @@ Original Product Info:
 Optimized Description:
 {description}
 """
-
         audit = await call_openai(
             [
                 {"role": "system", "content": "You are a CRO expert. Be blunt."},
@@ -161,9 +124,6 @@ Optimized Description:
 
         return {"audit": audit}
 
-    # -------------------------
-    # PROMPT 4 — Ad Hooks & A/B Test
-    # -------------------------
     async def prompt4(description: str, audit: str) -> Dict[str, Any]:
         prompt = f"""
 Generate:
@@ -186,7 +146,6 @@ Description:
 Audit:
 {audit}
 """
-
         ads = await call_openai(
             [
                 {"role": "system", "content": "You are a paid ads and A/B testing expert."},
@@ -197,14 +156,11 @@ Audit:
 
         return {"ad_hooks_and_test": ads}
 
-    # -------------------------
-    # Parse description
-    # -------------------------
     def parse_description(text: str) -> Dict[str, Any]:
         lines = [l.strip() for l in text.split("\n") if l.strip()]
         title = lines[0][:100] if lines else "Product Description"
 
-        bullets: List[str] = []
+        bullets = []
         for line in lines:
             if line.startswith(("-", "•", "*")):
                 clean = re.sub(r"\*\*", "", line[1:]).strip()
@@ -217,44 +173,31 @@ Audit:
             "description": text,
         }
 
-    # =========================
-    # EXECUTION FLOW
-    # =========================
     result: PromptChainResult = {}
 
     try:
-        # ---- Prompt 1 (cached) ----
-        p1_data: Optional[Dict[str, Any]] = None
-
+        p1_data = None
         if run_prompt1:
             cached = get_cached_prompt1_output(user_id, product_info)
-            if cached:
-                p1_data = cached
-            else:
-                p1_data = await prompt1(product_info)
+            p1_data = cached or await prompt1(product_info)
+            if not cached:
                 cache_prompt1_output(user_id, product_info, p1_data)
 
-        # ---- Prompt 2 ----
-        p2_data: Optional[Dict[str, Any]] = None
+        p2_data = None
         if run_prompt2 and p1_data:
             p2_data = await prompt2(p1_data)
             result.update(parse_description(p2_data["description"]))
 
-        # ---- Prompt 3 ----
-        p3_data: Optional[Dict[str, Any]] = None
+        p3_data = None
         if run_prompt3 and p2_data:
             p3_data = await prompt3(p2_data["description"])
             result["audit"] = p3_data["audit"]
 
-        # ---- Prompt 4 ----
         if run_prompt4 and p2_data and p3_data:
-            p4_data = await prompt4(
-                p2_data["description"],
-                p3_data["audit"],
-            )
+            p4_data = await prompt4(p2_data["description"], p3_data["audit"])
             result["ad_hooks_and_test"] = p4_data["ad_hooks_and_test"]
 
         return result
 
     except Exception as e:
-        raise RuntimeError(f"AI chain execution failed: {str(e)}")
+        raise RuntimeError(f"AI chain execution failed: {e}")

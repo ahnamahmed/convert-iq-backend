@@ -1,6 +1,8 @@
 from typing import List, Dict
 from google import genai
+from google.genai.types import GenerationConfig
 from app.config import get_settings
+import asyncio
 
 # =========================
 # Load settings
@@ -8,18 +10,14 @@ from app.config import get_settings
 settings = get_settings()
 
 if not settings.gemini_api_key:
-    raise RuntimeError(
-        "GEMINI_API_KEY is missing. Add it to backend/.env"
-    )
+    raise RuntimeError("GEMINI_API_KEY is missing. Add it to backend/.env")
 
 # =========================
 # Gemini client
 # =========================
-client = genai.Client(
-    api_key=settings.gemini_api_key
-)
+client = genai.Client(api_key=settings.gemini_api_key)
 
-MODEL_NAME = "gemini-3-flash"
+MODEL_NAME = "gemini-2.0-flash"  # ✅ stable
 
 
 # =========================
@@ -30,19 +28,19 @@ async def call_gemini(
     temperature: float = 0.7,
 ) -> str:
     """
-    messages format (OpenAI-compatible):
+    messages format:
     [
         {"role": "system", "content": "..."},
         {"role": "user", "content": "..."}
     ]
     """
 
-    # Combine messages into a single prompt (Gemini prefers this)
-    prompt_parts: List[str] = []
+    # Combine messages into one prompt
+    prompt_parts: list[str] = []
 
     for msg in messages:
-        role = msg["role"]
-        content = msg["content"]
+        role = msg.get("role")
+        content = msg.get("content", "")
 
         if role == "system":
             prompt_parts.append(f"System:\n{content}")
@@ -51,13 +49,15 @@ async def call_gemini(
 
     prompt = "\n\n".join(prompt_parts)
 
-    response = client.models.generate_content(
+    # Run blocking SDK safely inside async
+    response = await asyncio.to_thread(
+        client.models.generate_content,
         model=MODEL_NAME,
         contents=prompt,
-        generation_config={
-            "temperature": temperature,
-            "max_output_tokens": 2048,
-        },
+        generation_config=GenerationConfig(
+            temperature=temperature,
+            max_output_tokens=2048,
+        ),
     )
 
     if not response.text:
