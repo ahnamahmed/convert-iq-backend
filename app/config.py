@@ -11,7 +11,9 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60
 
     # AI
-    gemini_api_key: str
+    openrouter_api_key: str
+    openrouter_primary_model: str = "z-ai/glm-4.5-air:free"
+    openrouter_fallback_model: str = "google/gemma-3-4b-it:free"
 
     # Stripe
     stripe_secret_key: str | None = None

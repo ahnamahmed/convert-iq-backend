@@ -47,4 +47,4 @@ class Subscription(Base):
     )
 
     # 🔁 ORM relation
-    user = relationship("User", back_populates="subscription")
+    user = relationship("User", back_populates="subscriptions")

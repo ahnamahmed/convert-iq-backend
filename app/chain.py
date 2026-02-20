@@ -1,13 +1,18 @@
 from typing import Dict, Any, Optional, List, TypedDict
 from app.config import get_settings
 from app.cache import cache_prompt1_output, get_cached_prompt1_output
-from app.ai.gemini_client import call_gemini
+from app.ai.openrouter_client import generate_text_with_fallback
 import re
 
 settings = get_settings()
 
-if not settings.gemini_api_key:
-    raise RuntimeError("GEMINI_API_KEY is missing")
+# =========================
+# Safety check (OpenRouter)
+# =========================
+if not settings.openrouter_api_key:
+    raise RuntimeError(
+        "OPENROUTER_API_KEY is missing. Make sure it exists in backend/.env"
+    )
 
 class PromptChainResult(TypedDict, total=False):
     title: str
@@ -25,13 +30,21 @@ async def runPromptChain(
     run_prompt3: bool = True,
     run_prompt4: bool = True,
 ) -> PromptChainResult:
+    """
+    Executes a chained AI pipeline.
+    Prompt 1 output is cached.
+    Prompts 2-4 depend on previous steps.
+    """
 
-    # Gemini-safe wrapper (DO NOT rename)
+    # -------------------------
+    # Shared AI caller (OpenRouter)
+    # DO NOT RENAME — no refactor
+    # -------------------------
     async def call_openai(
         messages: List[Dict[str, str]],
         temperature: float,
     ) -> str:
-        return await call_gemini(
+        return await generate_text_with_fallback(
             messages=messages,
             temperature=temperature,
         )
